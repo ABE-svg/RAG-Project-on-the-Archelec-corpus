@@ -59,8 +59,6 @@ RAG-Project-on-the-Archelec-corpus/
 ├── faiss_index/
 │   ├── index.faiss
 │   └── index.pkl
-│
-└── .env
 ```
 
 ---

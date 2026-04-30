@@ -1,6 +1,6 @@
 # Archelec RAG — Élections législatives françaises de 1988
 
-## ⚠️ Comment utiliser ce projet
+## Comment utiliser ce projet
 
 Ce projet doit être exécuté **en local**.  
 Pour l’utiliser, vous devez cloner le dépôt et suivre les étapes d’installation ci-dessous.

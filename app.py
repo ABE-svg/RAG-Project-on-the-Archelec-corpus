@@ -41,6 +41,33 @@ state: dict = {}
 FAISS_INDEX_PATH = Path("faiss_index")
 
 
+def build_faiss_index(embedding_model):
+    print("Building the index for the first time (this will take a few minutes)...")
+
+    base_path = Path("text_files")
+    documents, file_names = [], []
+
+    for path in sorted(base_path.rglob("*.txt")):
+        with open(path, encoding="utf-8", errors="ignore") as f:
+            text = f.read().strip()
+        if text and "_PF_" in path.name:
+            documents.append(text)
+            file_names.append(path.name)
+
+    docs = [
+        Document(page_content=text, metadata={"source": name})
+        for text, name in zip(documents, file_names)
+    ]
+
+    splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    chunks = splitter.split_documents(docs)
+
+    faiss_db = FAISS.from_documents(chunks, embedding_model)
+    faiss_db.save_local(str(FAISS_INDEX_PATH))
+    print(f"Index built and saved: {len(chunks)} chunks from {len(documents)} documents.")
+    return faiss_db
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     embedding_model = HuggingFaceEmbeddings(
@@ -56,30 +83,9 @@ async def lifespan(app: FastAPI):
         )
         print("Index loaded.")
     else:
-        print("Building the index for the first time (this will take a few minutes)...")
+        faiss_db = build_faiss_index(embedding_model)
 
-        base_path = Path("text_files")
-        documents, file_names = [], []
-
-        for path in sorted(base_path.rglob("*.txt")):
-            with open(path, encoding="utf-8", errors="ignore") as f:
-                text = f.read().strip()
-            if text and "_PF_" in path.name:
-                documents.append(text)
-                file_names.append(path.name)
-
-        docs = [
-            Document(page_content=text, metadata={"source": name})
-            for text, name in zip(documents, file_names)
-        ]
-
-        splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-        chunks = splitter.split_documents(docs)
-
-        faiss_db = FAISS.from_documents(chunks, embedding_model)
-        faiss_db.save_local(str(FAISS_INDEX_PATH))
-        print(f"Index built and saved. {len(chunks)} chunks from {len(documents)} documents.")
-
+    print("Ready.")
     llm = HuggingFaceEndpoint(
         repo_id="meta-llama/Llama-3.1-8B-Instruct",
         task="text-generation",
@@ -90,7 +96,6 @@ async def lifespan(app: FastAPI):
     state["faiss_db"] = faiss_db
     state["chat_model"] = chat_model
 
-    print(f"Ready. {len(chunks)} chunks indexed from {len(documents)} documents.")
     yield
     state.clear()
 

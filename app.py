@@ -85,16 +85,8 @@ async def lifespan(app: FastAPI):
     else:
         faiss_db = build_faiss_index(embedding_model)
 
-    print("Ready.")
-    llm = HuggingFaceEndpoint(
-        repo_id="meta-llama/Llama-3.1-8B-Instruct",
-        task="text-generation",
-        huggingfacehub_api_token=HF_TOKEN,
-    )
-    chat_model = ChatHuggingFace(llm=llm)
-
     state["faiss_db"] = faiss_db
-    state["chat_model"] = chat_model
+    print("Ready.")
 
     yield
     state.clear()
@@ -115,6 +107,21 @@ def retrieve(query: str, k: int = 5) -> list[dict]:
     ]
 
 
+def get_chat_model():
+    """Retourne le modele existant ou en cree un nouveau si le token a change."""
+    if "chat_model" not in state:
+        token = state.get("hf_token") or HF_TOKEN
+        if not token:
+            raise ValueError("Aucun token HuggingFace disponible.")
+        llm = HuggingFaceEndpoint(
+            repo_id="meta-llama/Llama-3.1-8B-Instruct",
+            task="text-generation",
+            huggingfacehub_api_token=token,
+        )
+        state["chat_model"] = ChatHuggingFace(llm=llm)
+    return state["chat_model"]
+
+
 def generate(query: str, context: str) -> str:
     messages = [
         SystemMessage(
@@ -129,7 +136,7 @@ def generate(query: str, context: str) -> str:
             content=f"Question: {query}\n\nContexte:\n{context}\n\nRéponds de façon courte et factuelle."
         ),
     ]
-    response = state["chat_model"].invoke(messages)
+    response = get_chat_model().invoke(messages)
     return response.content
 
 
@@ -150,21 +157,15 @@ async def set_token(request: TokenRequest):
     token = request.token.strip()
     if not token.startswith("hf_"):
         return {"ok": False, "error": "Le token doit commencer par hf_"}
-    try:
-        llm = HuggingFaceEndpoint(
-            repo_id="meta-llama/Llama-3.1-8B-Instruct",
-            task="text-generation",
-            huggingfacehub_api_token=token,
-        )
-        state["chat_model"] = ChatHuggingFace(llm=llm)
-        return {"ok": True}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+    # On stocke juste le token — le modele sera (re)cree au prochain appel
+    state["hf_token"] = token
+    state.pop("chat_model", None)
+    return {"ok": True}
 
 
 @app.post("/ask")
 async def ask(request: QueryRequest):
-    if "chat_model" not in state:
+    if not state.get("hf_token") and not HF_TOKEN:
         return {"answer": "Aucun token configure. Rends-toi dans les Parametres pour entrer ton token HuggingFace.", "sources": []}
     retrieved = retrieve(request.query)
     context = "\n\n".join(
